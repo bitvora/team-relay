@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/fiatjaf/eventstore/postgresql"
 	"github.com/fiatjaf/khatru"
@@ -32,6 +33,8 @@ type NostrData struct {
 	Relays map[string][]string `json:"relays"`
 }
 
+var data NostrData
+
 func main() {
 	relay := khatru.NewRelay()
 
@@ -51,22 +54,16 @@ func main() {
 	relay.StoreEvent = append(relay.StoreEvent, db.SaveEvent)
 	relay.QueryEvents = append(relay.QueryEvents, db.QueryEvents)
 
-	response, err := http.Get("https://" + config.TeamDomain + "/.well-known/nostr.json")
-	if err != nil {
-		log.Fatalf("Error getting well known file")
-	}
-	defer response.Body.Close()
+	// Fetch the initial .well-known file
+	fetchNostrData(config.TeamDomain)
 
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		log.Fatalf("Error reading response body: %v", err)
-	}
-
-	var data NostrData
-	err = json.Unmarshal(body, &data)
-	if err != nil {
-		log.Fatalf("Error unmarshalling JSON: %v", err)
-	}
+	// Start a goroutine to fetch the .well-known file every hour
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			fetchNostrData(config.TeamDomain)
+		}
+	}()
 
 	relay.RejectEvent = append(relay.RejectEvent, func(ctx context.Context, event *nostr.Event) (reject bool, msg string) {
 		for _, pubkey := range data.Names {
@@ -79,6 +76,31 @@ func main() {
 
 	fmt.Println("running on :3334")
 	http.ListenAndServe(":3334", relay)
+}
+
+func fetchNostrData(teamDomain string) {
+	response, err := http.Get("https://" + teamDomain + "/.well-known/nostr.json")
+	if err != nil {
+		log.Printf("Error getting well known file: %v", err)
+		return
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Printf("Error reading response body: %v", err)
+		return
+	}
+
+	var newData NostrData
+	err = json.Unmarshal(body, &newData)
+	if err != nil {
+		log.Printf("Error unmarshalling JSON: %v", err)
+		return
+	}
+
+	data = newData
+	log.Println("Updated NostrData from .well-known file")
 }
 
 func LoadConfig() Config {

@@ -1,4 +1,4 @@
-module github.com/bitvora/unity-relay
+module github.com/bitvora/team-relay
 
 go 1.22.4
 
